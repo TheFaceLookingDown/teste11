@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Tab Viewer — detecta .html</title>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#000;--fg:#fff;--accent:#00ff99}
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:'Press Start 2P',monospace}
+    *{box-sizing:border-box}
+
+    .wrap{display:flex;flex-direction:column;height:100%;gap:12px;padding:18px}
+
+    header{display:flex;gap:12px;align-items:center}
+    h1{font-size:12px;margin:0}
+
+    .controls{margin-left:auto;display:flex;gap:8px;align-items:center}
+    .btn{background:transparent;border:2px solid var(--fg);color:var(--fg);padding:10px 12px;border-radius:6px;cursor:pointer;min-width:120px;text-align:center;user-select:none}
+    .btn:active{transform:translateY(1px)}
+
+    .tabs{display:flex;gap:6px;flex-wrap:wrap}
+    .tab{padding:8px 10px;border:2px solid var(--fg);border-bottom:4px solid var(--fg);background:rgba(255,255,255,0.02);cursor:pointer;display:flex;gap:8px;align-items:center}
+    .tab.active{background:var(--fg);color:var(--bg)}
+    .tab .close{font-size:10px;padding:2px 6px;border-left:1px solid rgba(0,0,0,0.2);cursor:pointer}
+
+    main{flex:1;border:2px solid var(--fg);overflow:hidden}
+    iframe{width:100%;height:100%;border:0;background:#fff}
+
+    .hint{font-size:10px;opacity:0.8}
+
+    .dropzone{border:2px dashed rgba(255,255,255,0.12);padding:12px;text-align:center}
+
+    @media (max-width:640px){.btn{min-width:90px;padding:8px}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Tab Viewer — detecta .html</h1>
+
+      <div class="controls">
+        <label class="btn" id="btn-scan">Detectar automaticamente</label>
+        <label class="btn" id="btn-add">Adicionar arquivos</label>
+        <input id="file-input" type="file" accept="text/html" multiple style="display:none">
+        <div class="hint">Arraste ou adicione arquivos para criar abas automaticamente.</div>
+      </div>
+    </header>
+
+    <div class="tabs" id="tabs"></div>
+
+    <div class="dropzone" id="dropzone">Arraste arquivos .html aqui</div>
+
+    <main id="viewer">
+      <iframe id="frame" sandbox="allow-scripts allow-same-origin"></iframe>
+    </main>
+  </div>
+
+  <script>
+    const AudioPlayer = (()=>{
+      const ctx = new (window.AudioContext||window.webkitAudioContext)();
+      function click(){
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = 'square';
+        o.frequency.value = 800;
+        g.gain.value = 0.000001;
+        o.connect(g); g.connect(ctx.destination);
+        const now = ctx.currentTime;
+        g.gain.setValueAtTime(0.000001, now);
+        g.gain.exponentialRampToValueAtTime(0.08, now + 0.005);
+        g.gain.exponentialRampToValueAtTime(0.00001, now + 0.09);
+        o.start(now);
+        o.stop(now + 0.1);
+      }
+      return {click}
+    })();
+
+    const tabsEl = document.getElementById('tabs');
+    const frame = document.getElementById('frame');
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('file-input');
+
+    const state = {tabs:[], activeId:null};
+    function makeId(){return 't'+Math.random().toString(36).slice(2,9)}
+
+    function renderTabs(){
+      tabsEl.innerHTML='';
+      for(const t of state.tabs){
+        const el = document.createElement('div'); el.className='tab'; el.dataset.id=t.id; el.textContent=t.name;
+        if(t.id===state.activeId) el.classList.add('active');
+        const close = document.createElement('span'); close.className='close'; close.textContent='×'; close.onclick=e=>{e.stopPropagation(); removeTab(t.id)};
+        el.appendChild(close);
+        el.onclick=()=>{AudioPlayer.click(); activateTab(t.id)};
+        tabsEl.appendChild(el);
+      }
+    }
+
+    function activateTab(id){
+      const t = state.tabs.find(x=>x.id===id); if(!t) return;
+      state.activeId=id; renderTabs(); frame.src=t.url;
+    }
+
+    function addTab(name,url,keepActive=true){
+      const id = makeId();
+      state.tabs.push({id,name,url});
+      renderTabs();
+      if(keepActive) activateTab(id);
+    }
+
+    function removeTab(id){
+      const i = state.tabs.findIndex(x=>x.id===id); if(i===-1) return;
+      const wasActive = state.tabs[i].id===state.activeId;
+      try{const u=state.tabs[i].url; if(u.startsWith('blob:')) URL.revokeObjectURL(u);}catch(e){}
+      state.tabs.splice(i,1);
+      if(wasActive){ if(state.tabs.length) activateTab(state.tabs[0].id); else {state.activeId=null; frame.src='about:blank'} }
+      renderTabs();
+    }
+
+    dropzone.addEventListener('dragover',e=>{e.preventDefault(); dropzone.style.opacity=0.8});
+    dropzone.addEventListener('dragleave',e=>{dropzone.style.opacity=1});
+    dropzone.addEventListener('drop',e=>{
+      e.preventDefault(); dropzone.style.opacity=1;
+      handleFiles(Array.from(e.dataTransfer.files));
+    });
+
+    document.getElementById('btn-add').addEventListener('click',()=>fileInput.click());
+    fileInput.addEventListener('change',e=>handleFiles(Array.from(e.target.files)));
+
+    function handleFiles(files){
+      const htmlFiles = files.filter(f=>f.name.endsWith('.html')||f.type==='text/html');
+      if(htmlFiles.length===0) return alert('Nenhum .html detectado.');
+      htmlFiles.forEach(f=>{addTab(f.name, URL.createObjectURL(f))});
+      fileInput.value='';
+    }
+
+    // Detecta arquivos automaticamente via file input simulado
+    document.getElementById('btn-scan').addEventListener('click',()=>{
+      AudioPlayer.click();
+      fileInput.click();
+    });
+
+  </script>
+</body>
+</html>
